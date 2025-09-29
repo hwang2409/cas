@@ -3,6 +3,7 @@
 #include <cmath>
 #include <stack>
 #include <queue>
+#include <numbers>
 
 eNode::eNode(NodeType t,
 			 const std::string &sym,
@@ -35,6 +36,20 @@ double eNode::eval(const std::unordered_map<std::string, double> &var) const {
 	switch (type) {
 		case NodeType::VARIABLE:
 			{
+				std::unordered_map<std::string, double> constants = {
+					{ "pi", M_PI },
+					{ "PI", M_PI },
+					{ "e", std::exp(1) },
+					{ "tau", 2 * M_PI },
+					{ "TAU", 2 * M_PI }
+				};
+
+				auto const_it = constants.find(symbol);
+				if (const_it != constants.end()) {
+					return const_it->second;
+				}
+
+
 				auto it = var.find(symbol);
 				if (it != var.end()) {
 					return it->second;

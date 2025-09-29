@@ -2,16 +2,15 @@
 #include <string>
 
 int main() {
-	eDAG tree;
+	eDAG t1, t2;
 
-	tree.parse("abs(x + y) ^ 2 ^ 3");
+	t1.parse("cos(theta)");
 
-	std::unordered_map<std::string, double> vars;
+	t2.parse("(2 + 3) / 5 * PI");
 
-	vars["x"] = 5.0;
-	vars["y"] = -10.0;
+	double theta = t2.eval();
 
-	std::cout << tree.eval(vars) << "\n";
+	std::cout << t1.eval({{"theta", theta}}) << "\n";
 
 	return 0;
 }
