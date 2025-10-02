@@ -3,6 +3,7 @@
 #define EDAG_HPP
 
 #include "dag.hpp"
+#include "rat.hpp"
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -42,21 +43,21 @@ class eNode {
 	public:
 		NodeType type;
 		std::string symbol;
-		double val;
+		std::variant<int64_t, Rational, double> value;
 		OPType op;
 		int precedence;
 		bool is_unary;
 
 		eNode(NodeType t,
 			  const std::string &sym,
-			  double val = 0.0,
+			  std::variant<int64_t, Rational, double> val = 0,
 			  OPType op = OPType::UNKNOWN,
 			  int prec = 0,
 			  bool unary = false);
 
 		std::string to_string() const;
 
-		double eval(const std::unordered_map<std::string, double> &var = {}) const;
+		std::variant<int64_t, Rational, double> eval(const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var = {}) const;
 
 		bool is_leaf() const;
 
@@ -80,7 +81,7 @@ class eDAG {
 		std::vector<std::string> infix2postfix(const std::vector<std::string> &tokens);
 		std::shared_ptr<eNode> create_node(const std::string &token);
 		std::string generate_id();
-		std::string intern_leaf(NodeType t, const std::string &sym, double val);
+		std::string intern_leaf(NodeType t, const std::string &sym, std::variant<int64_t, Rational, double> val);
 		bool is_comm(OPType op) const;
 		bool is_assoc(OPType op) const;
 		std::string make_op_key(OPType op, const std::vector<std::string> &children);
@@ -89,8 +90,8 @@ class eDAG {
 								   int precedence,
 								   bool is_unary,
 								   const std::vector<std::string> &children);
-		double eval_node(const std::string &node_id,
-						 const std::unordered_map<std::string, double> &var) const;
+		std::variant<int64_t, Rational, double> eval_node(const std::string &node_id,
+						 const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var) const;
 
 		std::vector<std::string> get_nodes(NodeType type) const;
 	public:
@@ -116,7 +117,10 @@ class eDAG {
 		// return id of node
 		std::string get_root() const;
 
-		double eval(const std::unordered_map<std::string, double> &var = {}) const;
+		std::variant<int64_t, Rational, double> eval(const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var = {}) const;
+		
+		// Add exact evaluation method
+		std::variant<int64_t, Rational, double> eval_exact(const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var = {}) const;
 
 		std::vector<std::string> get_vars() const;
 
@@ -149,7 +153,22 @@ class eDAG {
 		eDAG canonicalize() const;
 
 		eDAG substitute(const std::unordered_map<std::string, std::string> &subs) const;
+		
+		// Add rational detection and conversion
+		bool is_rational_expression(const std::string &node_id) const;
+		Rational to_rational(const std::string &node_id) const;
+		Rational to_rational() const;
+		
+		// Add exact simplification methods
+		eDAG simplify_exact() const;
+		eDAG combine_like_terms() const;
+		eDAG factor_rationals() const;
 };
+
+// Helper functions for variant handling
+double variant_to_double(const std::variant<int64_t, Rational, double>& v);
+bool all_rational(const std::vector<std::variant<int64_t, Rational, double>>& vals);
+Rational variant_to_rational(const std::variant<int64_t, Rational, double>& v);
 
 namespace math_utils {
 	// convert op string to op type

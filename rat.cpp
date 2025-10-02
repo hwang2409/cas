@@ -145,6 +145,11 @@ Rational Rational::operator/(const Rational &other) const {
 	return Rational{n1, d1};
 }
 
+// Unary minus: -a/b = -a/b
+Rational Rational::operator-() const {
+	return Rational(-this->num, this->den);
+}
+
 bool Rational::operator==(const Rational &other) const {
 	int64_t a = this->num,
 			b = this->den,

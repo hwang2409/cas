@@ -18,6 +18,7 @@ class Rational {
 		Rational operator-(const Rational &other) const;
 		Rational operator*(const Rational &other) const;
 		Rational operator/(const Rational &other) const;
+		Rational operator-() const;  // unary minus
 
 		bool operator==(const Rational &other) const;
 		bool operator!=(const Rational &other) const;

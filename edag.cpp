@@ -5,14 +5,47 @@
 #include <queue>
 #include <numbers>
 
+// Helper function to convert variant to double for arithmetic
+double variant_to_double(const std::variant<int64_t, Rational, double>& v) {
+	if (std::holds_alternative<double>(v)) {
+		return std::get<double>(v);
+	} else if (std::holds_alternative<int64_t>(v)) {
+		return static_cast<double>(std::get<int64_t>(v));
+	} else if (std::holds_alternative<Rational>(v)) {
+		return std::get<Rational>(v).val();
+	}
+	return 0.0;
+}
+
+// Helper function to check if all operands are rational
+bool all_rational(const std::vector<std::variant<int64_t, Rational, double>>& vals) {
+	for (const auto& v : vals) {
+		if (!std::holds_alternative<Rational>(v) && !std::holds_alternative<int64_t>(v)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Helper function to convert to Rational
+Rational variant_to_rational(const std::variant<int64_t, Rational, double>& v) {
+	if (std::holds_alternative<Rational>(v)) {
+		return std::get<Rational>(v);
+	} else if (std::holds_alternative<int64_t>(v)) {
+		return Rational(std::get<int64_t>(v), 1);
+	} else {
+		return Rational(std::get<double>(v));
+	}
+}
+
 eNode::eNode(NodeType t,
 			 const std::string &sym,
-			 double val,
+			 std::variant<int64_t, Rational, double> val,
 			 OPType op,
 			 int prec,
 			 bool unary) : type(t),
 						   symbol(sym),
-						   val(val),
+						   value(val),
 						   op(op),
 						   precedence(prec),
 						   is_unary(unary) {}
@@ -22,7 +55,18 @@ std::string eNode::to_string() const {
 		case NodeType::VARIABLE:
 			return symbol;
 		case NodeType::CONSTANT:
-			return std::to_string(val);
+			if (std::holds_alternative<Rational>(value)) {
+				Rational r = std::get<Rational>(value);
+				if (r.denominator() == 1) {
+					return std::to_string(r.numerator());
+				} else {
+					return std::to_string(r.numerator()) + "/" + std::to_string(r.denominator());
+				}
+			} else if (std::holds_alternative<int64_t>(value)) {
+				return std::to_string(std::get<int64_t>(value));
+			} else {
+				return std::to_string(std::get<double>(value));
+			}
 		case NodeType::OPERATION:
 			return symbol;
 		case NodeType::FUNCTION:
@@ -32,23 +76,18 @@ std::string eNode::to_string() const {
 	}
 }
 
-double eNode::eval(const std::unordered_map<std::string, double> &var) const {
+std::variant<int64_t, Rational, double> eNode::eval(const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var) const {
 	switch (type) {
 		case NodeType::VARIABLE:
 			{
-				std::unordered_map<std::string, double> constants = {
-					{ "pi", M_PI },
-					{ "PI", M_PI },
-					{ "e", std::exp(1) },
-					{ "tau", 2 * M_PI },
-					{ "TAU", 2 * M_PI }
-				};
-
-				auto const_it = constants.find(symbol);
-				if (const_it != constants.end()) {
-					return const_it->second;
+				// Check for built-in constants
+				if (symbol == "pi" || symbol == "PI") {
+					return M_PI;
+				} else if (symbol == "e") {
+					return std::exp(1);
+				} else if (symbol == "tau" || symbol == "TAU") {
+					return 2 * M_PI;
 				}
-
 
 				auto it = var.find(symbol);
 				if (it != var.end()) {
@@ -58,7 +97,7 @@ double eNode::eval(const std::unordered_map<std::string, double> &var) const {
 				throw std::runtime_error("var: {" + symbol + "} not found in evaluation context.");
 			}
 		case NodeType::CONSTANT:
-			return val;
+			return value;
 		case NodeType::OPERATION:
 		case NodeType::FUNCTION:
 			throw std::runtime_error("can't evaluate op node without operands.");
@@ -225,9 +264,21 @@ std::string eDAG::generate_id() {
 
 std::string eDAG::intern_leaf(NodeType t,
 							  const std::string &sym,
-							  double val) {
-	std::string key = (t == NodeType::VARIABLE ? "var:" + sym
-											   : "const:" + std::to_string(val));
+							  std::variant<int64_t, Rational, double> val) {
+	std::string key;
+	if (t == NodeType::VARIABLE) {
+		key = "var:" + sym;
+	} else {
+		// Create key based on variant type
+		if (std::holds_alternative<Rational>(val)) {
+			Rational r = std::get<Rational>(val);
+			key = "const:" + std::to_string(r.numerator()) + "/" + std::to_string(r.denominator());
+		} else if (std::holds_alternative<int64_t>(val)) {
+			key = "const:" + std::to_string(std::get<int64_t>(val));
+		} else {
+			key = "const:" + std::to_string(std::get<double>(val));
+		}
+	}
 
 	auto it = leaf_intern.find(key);
 
@@ -238,7 +289,7 @@ std::string eDAG::intern_leaf(NodeType t,
 	std::shared_ptr<eNode> node;
 
 	if (t == NodeType::VARIABLE) {
-		node = std::make_shared<eNode>(NodeType::VARIABLE, sym);
+		node = std::make_shared<eNode>(NodeType::VARIABLE, sym, 0);
 	} else {
 		node = std::make_shared<eNode>(NodeType::CONSTANT, sym, val);
 	}
@@ -332,8 +383,8 @@ std::string eDAG::intern_op_node(OPType op,
 	return id;
 }
 
-double eDAG::eval_node(const std::string &node_id,
-				 const std::unordered_map<std::string, double> &var) const {
+std::variant<int64_t, Rational, double> eDAG::eval_node(const std::string &node_id,
+				 const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var) const {
 	auto node_it = nodes.find(node_id);
 
 	if (node_it == nodes.end()) {
@@ -362,7 +413,7 @@ double eDAG::eval_node(const std::string &node_id,
 		eval_order = neighbors;
 	}
 
-	std::vector<double> op_vals;
+	std::vector<std::variant<int64_t, Rational, double>> op_vals;
 
 	for (const auto &op : eval_order) {
 		op_vals.push_back(this->eval_node(op, var));
@@ -371,50 +422,132 @@ double eDAG::eval_node(const std::string &node_id,
 	switch (node->op) {
 		case (OPType::ADD): {
 			if (op_vals.empty()) throw std::runtime_error("ADD requires >=1 op.");
-			double s = op_vals[0];
-			for (size_t j = 1; j < op_vals.size(); ++j) s += op_vals[j];
+			
+			// Try exact arithmetic first
+			if (all_rational(op_vals)) {
+				Rational sum(0, 1);
+				for (const auto& val : op_vals) {
+					sum = sum + variant_to_rational(val);
+				}
+				return sum;
+			}
+			
+			// Fall back to double arithmetic
+			double s = variant_to_double(op_vals[0]);
+			for (size_t j = 1; j < op_vals.size(); ++j) {
+				s += variant_to_double(op_vals[j]);
+			}
 			return s;
 		}
-		case (OPType::SUBTRACT):
+		case (OPType::SUBTRACT): {
 			if (op_vals.size() != 2) throw std::runtime_error("SUB requires 2 ops.");
-			return op_vals[0] - op_vals[1];
+			
+			// Try exact arithmetic first
+			if (all_rational(op_vals)) {
+				Rational left = variant_to_rational(op_vals[0]);
+				Rational right = variant_to_rational(op_vals[1]);
+				return left - right;
+			}
+			
+			// Fall back to double arithmetic
+			double left = variant_to_double(op_vals[0]);
+			double right = variant_to_double(op_vals[1]);
+			return left - right;
+		}
 		case (OPType::MULTIPLY): {
 			if (op_vals.empty()) throw std::runtime_error("MUL requires >=1 op.");
-			double p = op_vals[0];
-			for (size_t j = 1; j < op_vals.size(); ++j) p *= op_vals[j];
+			
+			// Try exact arithmetic first
+			if (all_rational(op_vals)) {
+				Rational product(1, 1);
+				for (const auto& val : op_vals) {
+					product = product * variant_to_rational(val);
+				}
+				return product;
+			}
+			
+			// Fall back to double arithmetic
+			double p = variant_to_double(op_vals[0]);
+			for (size_t j = 1; j < op_vals.size(); ++j) {
+				p *= variant_to_double(op_vals[j]);
+			}
 			return p;
 		}
-		case (OPType::DIVIDE):
+		case (OPType::DIVIDE): {
 			if (op_vals.size() != 2) throw std::runtime_error("DIV requires 2 ops.");
-			if (op_vals[1] == 0) throw std::runtime_error("DIV BY ZERO.");
-			return op_vals[0] / op_vals[1];
-		case (OPType::POWER):
+			
+			// Check for division by zero
+			if (std::holds_alternative<double>(op_vals[1]) && std::get<double>(op_vals[1]) == 0.0) {
+				throw std::runtime_error("DIV BY ZERO.");
+			}
+			if (std::holds_alternative<int64_t>(op_vals[1]) && std::get<int64_t>(op_vals[1]) == 0) {
+				throw std::runtime_error("DIV BY ZERO.");
+			}
+			if (std::holds_alternative<Rational>(op_vals[1]) && std::get<Rational>(op_vals[1]).is_zero()) {
+				throw std::runtime_error("DIV BY ZERO.");
+			}
+			
+			// Try exact arithmetic first
+			if (all_rational(op_vals)) {
+				Rational left = variant_to_rational(op_vals[0]);
+				Rational right = variant_to_rational(op_vals[1]);
+				return left / right;
+			}
+			
+			// Fall back to double arithmetic
+			double left = variant_to_double(op_vals[0]);
+			double right = variant_to_double(op_vals[1]);
+			if (right == 0) throw std::runtime_error("DIV BY ZERO.");
+			return left / right;
+		}
+		case (OPType::POWER): {
 			if (op_vals.size() != 2) throw std::runtime_error("POW requires 2 ops.");
-			return std::pow(op_vals[0], op_vals[1]);
-		case (OPType::NEGATE):
+			double base = variant_to_double(op_vals[0]);
+			double exp = variant_to_double(op_vals[1]);
+			return std::pow(base, exp);
+		}
+		case (OPType::NEGATE): {
 			if (op_vals.size() != 1) throw std::runtime_error("NEG requires 1 op.");
-			return -op_vals[0];
-		case (OPType::SIN):
+			
+			// Try exact arithmetic first
+			if (std::holds_alternative<Rational>(op_vals[0])) {
+				Rational r = std::get<Rational>(op_vals[0]);
+				return -r;
+			} else if (std::holds_alternative<int64_t>(op_vals[0])) {
+				return -std::get<int64_t>(op_vals[0]);
+			}
+			
+			// Fall back to double arithmetic
+			return -variant_to_double(op_vals[0]);
+		}
+		case (OPType::SIN): {
 			if (op_vals.size() != 1) throw std::runtime_error("SIN requires 1 op.");
-			return std::sin(op_vals[0]);
-		case (OPType::COS):
+			return std::sin(variant_to_double(op_vals[0]));
+		}
+		case (OPType::COS): {
 			if (op_vals.size() != 1) throw std::runtime_error("COS requires 1 op.");
-			return std::cos(op_vals[0]);
-		case (OPType::TAN):
+			return std::cos(variant_to_double(op_vals[0]));
+		}
+		case (OPType::TAN): {
 			if (op_vals.size() != 1) throw std::runtime_error("TAN requires 1 op.");
-			return std::tan(op_vals[0]);
-		case (OPType::LOG):
+			return std::tan(variant_to_double(op_vals[0]));
+		}
+		case (OPType::LOG): {
 			if (op_vals.size() != 1) throw std::runtime_error("LOG requires 1 op.");
-			return std::log(op_vals[0]);
-		case (OPType::EXP):
+			return std::log(variant_to_double(op_vals[0]));
+		}
+		case (OPType::EXP): {
 			if (op_vals.size() != 1) throw std::runtime_error("EXP requires 1 op.");
-			return std::exp(op_vals[0]);
-		case (OPType::SQRT):
+			return std::exp(variant_to_double(op_vals[0]));
+		}
+		case (OPType::SQRT): {
 			if (op_vals.size() != 1) throw std::runtime_error("SQRT requires 1 op.");
-			return std::sqrt(op_vals[0]);
-		case (OPType::ABS):
+			return std::sqrt(variant_to_double(op_vals[0]));
+		}
+		case (OPType::ABS): {
 			if (op_vals.size() != 1) throw std::runtime_error("ABS requires 1 op.");
-			return std::abs(op_vals[0]);
+			return std::abs(variant_to_double(op_vals[0]));
+		}
 		default:
 			throw std::runtime_error("UNKNOWN OP: " + node->symbol);
 	}
@@ -442,16 +575,20 @@ void eDAG::parse(const std::string &expr) {
 
 	for (const auto &token : postfix) {
 		if (math_utils::is_num(token)) {
-			double val = std::stod(token);
-			std::string node_id = intern_leaf(NodeType::CONSTANT,
-											  token,
-											  val);
-			node_stack.push(node_id);
+			// Try to parse as exact rational first
+			try {
+				Rational r(token);
+				std::string node_id = intern_leaf(NodeType::CONSTANT, token, r);
+				node_stack.push(node_id);
+			} catch (...) {
+				// Fall back to double
+				double val = std::stod(token);
+				std::string node_id = intern_leaf(NodeType::CONSTANT, token, val);
+				node_stack.push(node_id);
+			}
 		} else if (math_utils::is_var(token) &&
 				   math_utils::string_to_op(token) == OPType::UNKNOWN) {
-			std::string node_id = intern_leaf(NodeType::VARIABLE,
-											  token,
-											  0.0);
+			std::string node_id = intern_leaf(NodeType::VARIABLE, token, 0);
 			node_stack.push(node_id);
 		} else {
 			OPType op = math_utils::string_to_op(token);
@@ -540,7 +677,15 @@ std::string eDAG::get_root() const {
 	return root;
 }
 
-double eDAG::eval(const std::unordered_map<std::string, double> &var) const {
+std::variant<int64_t, Rational, double> eDAG::eval(const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var) const {
+	if (root.empty()) {
+		throw std::runtime_error("no expression parsed.");
+	}
+
+	return eval_node(root, var);
+}
+
+std::variant<int64_t, Rational, double> eDAG::eval_exact(const std::unordered_map<std::string, std::variant<int64_t, Rational, double>> &var) const {
 	if (root.empty()) {
 		throw std::runtime_error("no expression parsed.");
 	}
@@ -605,6 +750,93 @@ bool eDAG::empty() const {
 	return (graph.size() == 0);
 }
 
+// Rational detection and conversion methods
+bool eDAG::is_rational_expression(const std::string &node_id) const {
+	auto node = get_node(node_id);
+	if (!node) return false;
+	
+	if (node->is_leaf()) {
+		return std::holds_alternative<Rational>(node->value) || std::holds_alternative<int64_t>(node->value);
+	}
+	
+	// Check if this is a function that can't be rational
+	if (node->type == NodeType::OPERATION) {
+		switch (node->op) {
+			case OPType::SIN:
+			case OPType::COS:
+			case OPType::TAN:
+			case OPType::LOG:
+			case OPType::EXP:
+			case OPType::SQRT:
+			case OPType::ABS:
+				return false;  // These functions generally don't produce rational results
+			default:
+				break;
+		}
+	}
+	
+	// Check if all children are rational
+	auto neighbors = graph.get_neighbors(node_id);
+	for (const auto &child : neighbors) {
+		if (!is_rational_expression(child)) {
+			return false;
+		}
+	}
+	
+	return true;
+}
+
+Rational eDAG::to_rational(const std::string &node_id) const {
+	auto node = get_node(node_id);
+	if (!node) throw std::runtime_error("Node not found");
+	
+	if (node->is_leaf()) {
+		if (std::holds_alternative<Rational>(node->value)) {
+			return std::get<Rational>(node->value);
+		} else if (std::holds_alternative<int64_t>(node->value)) {
+			return Rational(std::get<int64_t>(node->value), 1);
+		} else {
+			return Rational(std::get<double>(node->value));
+		}
+	}
+	
+	// Evaluate the node and convert to rational
+	auto result = eval_node(node_id, {});
+	return variant_to_rational(result);
+}
+
+Rational eDAG::to_rational() const {
+	if (root.empty()) {
+		throw std::runtime_error("No expression parsed");
+	}
+	return to_rational(root);
+}
+
+// Exact simplification methods
+eDAG eDAG::simplify_exact() const {
+	eDAG result = *this;
+	
+	// Apply exact simplifications
+	result = result.combine_like_terms();
+	result = result.factor_rationals();
+	
+	return result;
+}
+
+eDAG eDAG::combine_like_terms() const {
+	// For now, return a copy - full implementation would require
+	// polynomial detection and like-term combining
+	eDAG result = *this;
+	return result;
+}
+
+eDAG eDAG::factor_rationals() const {
+	// For now, return a copy - full implementation would require
+	// rational factorization and simplification
+	eDAG result = *this;
+	return result;
+}
+
 eDAG eDAG::canonicalize() const {
 	eDAG out;
 
@@ -621,7 +853,21 @@ eDAG eDAG::canonicalize() const {
 			if (node->type == NodeType::VARIABLE) {
 				return out.intern_leaf(NodeType::VARIABLE, node->symbol, 0.0);
 			} else {
-				return out.intern_leaf(NodeType::CONSTANT, std::to_string(node->val), node->val);
+				// Convert value to string for symbol
+				std::string symbol;
+				if (std::holds_alternative<Rational>(node->value)) {
+					Rational r = std::get<Rational>(node->value);
+					if (r.denominator() == 1) {
+						symbol = std::to_string(r.numerator());
+					} else {
+						symbol = std::to_string(r.numerator()) + "/" + std::to_string(r.denominator());
+					}
+				} else if (std::holds_alternative<int64_t>(node->value)) {
+					symbol = std::to_string(std::get<int64_t>(node->value));
+				} else {
+					symbol = std::to_string(std::get<double>(node->value));
+				}
+				return out.intern_leaf(NodeType::CONSTANT, symbol, node->value);
 			}
 		}
 
@@ -645,6 +891,7 @@ eDAG eDAG::canonicalize() const {
 
 	return out;
 }
+
 
 namespace math_utils {
 	OPType string_to_op(const std::string &op) {

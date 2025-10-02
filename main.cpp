@@ -2,33 +2,68 @@
 #include "utils.hpp"
 #include "rat.hpp"
 #include <string>
+#include <iostream>
+#include <unordered_map>
 
 int main() {
-	eDAG t1, t2;
+	eDAG exact_tree;
+	exact_tree.parse("1/3 + 2/3");
 
-	t1.parse("cos(theta)");
+	try {
+		auto result = exact_tree.eval_exact();
+		if (std::holds_alternative<Rational>(result)) {
+			std::cout << "Exact result: " << std::get<Rational>(result) << std::endl;
+		} else if (std::holds_alternative<int64_t>(result)) {
+			std::cout << "Exact result: " << std::get<int64_t>(result) << std::endl;
+		} else {
+			std::cout << "Approximate result: " << std::get<double>(result) << std::endl;
+		}
+	} catch (const std::exception& e) {
+		std::cout << "Error: " << e.what() << std::endl;
+	}
 
-	t2.parse("(2 + 3) / 5 * PI");
+	eDAG var_tree;
+	var_tree.parse("x + y");
 
-	double theta = t2.eval();
+	std::unordered_map<std::string, std::variant<int64_t, Rational, double>> vars;
+	vars["x"] = Rational(1, 3);
+	vars["y"] = Rational(2, 3);
 
-	std::cout << t1.eval({{"theta", theta}}) << "\n";
+	std::cout << "\nExpression: x + y where x=1/3, y=2/3" << std::endl;
 
-	eDAG t3 = t1.canonicalize();
+	try {
+		auto result = var_tree.eval(vars);
+		if (std::holds_alternative<Rational>(result)) {
+			std::cout << "Exact result: " << std::get<Rational>(result) << std::endl;
+		} else if (std::holds_alternative<int64_t>(result)) {
+			std::cout << "Exact result: " << std::get<int64_t>(result) << std::endl;
+		} else {
+			std::cout << "Approximate result: " << std::get<double>(result) << std::endl;
+		}
+	} catch (const std::exception& e) {
+		std::cout << "Error: " << e.what() << std::endl;
+	}
 
-	std::cout << t3.eval({{"theta", theta}}) << "\n";
+	std::cout << "\nRational detection tests:" << std::endl;
 
-	Rational p1{M_PI}, p2{M_PI};
+	eDAG rational_expr;
+	rational_expr.parse("1/2 + 1/3");
+	std::cout << "1/2 + 1/3 is rational: " << (rational_expr.is_rational_expression(rational_expr.get_root()) ? "true" : "false") << std::endl;
 
-	Rational p3 = p1 + p2;
+	eDAG mixed_expr;
+	mixed_expr.parse("1/2 + sqrt(2)");
+	std::cout << "1/2 + sqrt(2) is rational: " << (mixed_expr.is_rational_expression(mixed_expr.get_root()) ? "true" : "false") << std::endl;
 
-	std::cout << p3.val() << "\n";
+	try {
+		Rational r = rational_expr.to_rational();
+		std::cout << "1/2 + 1/3 as rational: " << r << std::endl;
+	} catch (const std::exception& e) {
+		std::cout << "Cannot convert to rational: " << e.what() << std::endl;
+	}
 
-	std::cout << p3 << "\n";
-
-	Rational p4{"-1/12"};
-
-	std::cout << p4 << std::endl;
+	std::cout << "\nExact simplification:" << std::endl;
+	eDAG simplified = rational_expr.simplify_exact();
+	std::cout << "Simplified expression (placeholder)" << std::endl;
 
 	return 0;
 }
