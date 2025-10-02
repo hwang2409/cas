@@ -12,5 +12,9 @@ int main() {
 
 	std::cout << t1.eval({{"theta", theta}}) << "\n";
 
+	eDAG t3 = t1.canonicalize();
+
+	std::cout << t3.eval({{"theta", theta}}) << "\n";
+
 	return 0;
 }

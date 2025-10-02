@@ -121,11 +121,25 @@ std::vector<std::string> eDAG::infix2postfix(const std::vector<std::string> &tok
 
 	for (size_t j = 0; j < tokens.size(); ++j) {
 		const auto &token = tokens[j];
+		std::string current = token;
 
-		if (math_utils::is_num(token)) {
-			pfix.push_back(token);
-		} else if (math_utils::string_to_op(token) != OPType::UNKNOWN) {
-			OPType op = math_utils::string_to_op(token);
+		// Detect unary minus and convert to explicit NEGATE operator token
+		// Unary if at expression start, after '(', or after another operator
+		if (current == "-") {
+			bool is_unary_context = (j == 0);
+			if (!is_unary_context) {
+				const std::string &prev = tokens[j - 1];
+				is_unary_context = (prev == "(" || math_utils::string_to_op(prev) != OPType::UNKNOWN);
+			}
+			if (is_unary_context) {
+				current = "neg"; // map to NEGATE
+			}
+		}
+
+		if (math_utils::is_num(current)) {
+			pfix.push_back(current);
+		} else if (math_utils::string_to_op(current) != OPType::UNKNOWN) {
+			OPType op = math_utils::string_to_op(current);
 			int prec = math_utils::get_op_precedence(op);
 
 			while (!ops.empty() && ops.top() != "(" &&
@@ -138,12 +152,12 @@ std::vector<std::string> eDAG::infix2postfix(const std::vector<std::string> &tok
 				precedences.pop();
 			}
 
-			ops.push(token);
+			ops.push(current);
 			precedences.push(prec);
-		} else if (token == "(") {
+		} else if (current == "(") {
 			ops.push(token);
 			precedences.push(0);
-		} else if (token == ")") {
+		} else if (current == ")") {
 			while (!ops.empty() && ops.top() != "(") {
 				pfix.push_back(ops.top());
 				ops.pop();
@@ -167,7 +181,7 @@ std::vector<std::string> eDAG::infix2postfix(const std::vector<std::string> &tok
 				}
 			}
 		} else {
-			pfix.push_back(token);
+			pfix.push_back(current);
 		}
 	}
 
@@ -356,7 +370,7 @@ double eDAG::eval_node(const std::string &node_id,
 
 	switch (node->op) {
 		case (OPType::ADD): {
-			if (op_vals.size() != 2) throw std::runtime_error("ADD requires 2 ops.");
+			if (op_vals.empty()) throw std::runtime_error("ADD requires >=1 op.");
 			double s = op_vals[0];
 			for (size_t j = 1; j < op_vals.size(); ++j) s += op_vals[j];
 			return s;
@@ -365,7 +379,7 @@ double eDAG::eval_node(const std::string &node_id,
 			if (op_vals.size() != 2) throw std::runtime_error("SUB requires 2 ops.");
 			return op_vals[0] - op_vals[1];
 		case (OPType::MULTIPLY): {
-			if (op_vals.size() != 2) throw std::runtime_error("MUL requires 2 ops.");
+			if (op_vals.empty()) throw std::runtime_error("MUL requires >=1 op.");
 			double p = op_vals[0];
 			for (size_t j = 1; j < op_vals.size(); ++j) p *= op_vals[j];
 			return p;
@@ -591,10 +605,52 @@ bool eDAG::empty() const {
 	return (graph.size() == 0);
 }
 
+eDAG eDAG::canonicalize() const {
+	eDAG out;
+
+	std::function<std::string(const std::string&)> clone_id = [&](const std::string &id) -> std::string {
+		auto it = nodes.find(id);
+
+		if (it == nodes.end()) {
+			throw std::runtime_error("node not found: " + id);
+		}
+
+		const auto &node = it->second;
+
+		if (node->is_leaf()) {
+			if (node->type == NodeType::VARIABLE) {
+				return out.intern_leaf(NodeType::VARIABLE, node->symbol, 0.0);
+			} else {
+				return out.intern_leaf(NodeType::CONSTANT, std::to_string(node->val), node->val);
+			}
+		}
+
+		auto itc = orderedc.find(id);
+
+		std::vector<std::string> children = ((itc != orderedc.end()) ? itc->second : graph.get_neighbors(id));
+		std::vector<std::string> rebuilt;
+
+		for (const auto &c : children) {
+			rebuilt.push_back(clone_id(c));
+		}
+
+		return out.intern_op_node(node->op,
+								  node->symbol,
+								  node->precedence,
+								  node->is_unary,
+								  rebuilt);
+	};
+
+	out.root = clone_id(this->root);
+
+	return out;
+}
+
 namespace math_utils {
 	OPType string_to_op(const std::string &op) {
 		if (op == "+") return OPType::ADD;
 		if (op == "-") return OPType::SUBTRACT;
+		if (op == "neg") return OPType::NEGATE;
 		if (op == "*") return OPType::MULTIPLY;
 		if (op == "/") return OPType::DIVIDE;
 		if (op == "^") return OPType::POWER;
@@ -664,7 +720,7 @@ namespace math_utils {
 	}
 
 	bool is_right_assoc(OPType op) {
-		return op == OPType::EXP;
+		return op == OPType::POWER;
 	}
 
 	bool is_digit(char c) {
@@ -672,7 +728,7 @@ namespace math_utils {
 	}
 
 	bool is_letter(char c) {
-		return (c >= 'a' && c <= 'z') || (c >= 'A' || c <= 'Z');
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 	}
 
 	bool is_op(char c) {
